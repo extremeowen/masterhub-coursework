@@ -1,0 +1,22 @@
+flowchart LR
+    client[Client / Browser]
+    dns[DNS<br/>masterhub.local]
+    ingress[Ingress / Gateway<br/>NGINX Ingress Controller]
+    frontendSvc[Service<br/>masterhub-frontend :80]
+    apiSvc[Service ClusterIP<br/>masterhub-api :8080]
+    frontendPods[Frontend Deployment<br/>2 replicas]
+    apiPods[API Deployment<br/>2 replicas]
+    postgresSvc[Service<br/>postgres :5432]
+    postgres[(PostgreSQL StatefulSet<br/>1 replica + PVC)]
+    otel[OTEL Collector<br/>observability namespace]
+    tempo[Tempo / Prometheus / Loki<br/>observability stack]
+    registry[GitHub Actions<br/>GHCR registry]
+
+    client --> dns --> ingress
+    ingress -->|/| frontendSvc --> frontendPods
+    ingress -->|/orders, /health| apiSvc --> apiPods
+    apiPods --> postgresSvc --> postgres
+    apiPods -. OTLP traces/metrics .-> otel -.-> tempo
+    registry -. image pull .-> frontendPods
+    registry -. image pull .-> apiPods
+

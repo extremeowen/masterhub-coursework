@@ -1,0 +1,1099 @@
+openapi: 3.0.3
+info:
+  title: MasterHub API
+  description: >
+    Контракт API MasterHub — маркетплейсу перевірених майстрів.
+    Описує публічні, авторизовані (user) та адміністративні (admin) ендпоінти.
+    Секції `/orders*` — сумісні anonymous-маршрути з ідемпотентним POST;
+    основний робочий потік іде через `/user/*` і `/admin/*` із сесійним cookie.
+  version: 2.0.0
+
+servers:
+  - url: http://localhost:8081
+    description: Docker Compose
+  - url: http://localhost:8080
+    description: npm start
+
+tags:
+  - name: System
+  - name: Auth
+  - name: Orders (legacy)
+  - name: User
+  - name: Admin
+  - name: Reviews
+
+security: []
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Перевірка стану сервісу
+      operationId: getHealth
+      responses:
+        "200":
+          description: Сервіс працює
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /orders:
+    post:
+      tags: [Orders (legacy)]
+      summary: Створити замовлення
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Замовлення створено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "400":
+          description: Помилка валідації
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Перевищено ліміт запитів
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Залежність тимчасово недоступна
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    get:
+      tags: [Orders (legacy)]
+      summary: Отримати список замовлень
+      operationId: listOrders
+      responses:
+        "200":
+          description: Список замовлень
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrderResponse"
+
+  /orders/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+
+    get:
+      tags: [Orders (legacy)]
+      summary: Отримати замовлення за id
+      operationId: getOrderById
+      responses:
+        "200":
+          description: Замовлення знайдено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "404":
+          description: Замовлення не знайдено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    put:
+      tags: [Orders (legacy)]
+      summary: Оновити замовлення (зміна статусу або дати)
+      operationId: updateOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrderRequest"
+      responses:
+        "200":
+          description: Замовлення оновлено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "400":
+          description: Помилка валідації
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Замовлення не знайдено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    delete:
+      tags: [Orders (legacy)]
+      summary: Видалити (скасувати) замовлення
+      operationId: deleteOrder
+      responses:
+        "204":
+          description: Замовлення видалено
+        "404":
+          description: Замовлення не знайдено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /healthz:
+    get:
+      tags: [System]
+      summary: Liveness-перевірка (Kubernetes)
+      operationId: getHealthz
+      responses:
+        "200":
+          description: Процес живий і PostgreSQL доступний
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /ready:
+    get:
+      tags: [System]
+      summary: Readiness-перевірка (Kubernetes)
+      operationId: getReady
+      responses:
+        "200":
+          description: Сервіс готовий приймати трафік
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Реєстрація (завжди роль user)
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Користувача створено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Вхід; встановлює HttpOnly cookie сесії
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Вхід виконано
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Вихід; скидає cookie сесії
+      operationId: logout
+      security:
+        - cookieAuth: []
+      responses:
+        "204":
+          description: Вихід виконано
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Поточний користувач
+      operationId: getMe
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Дані користувача
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /user/catalog:
+    get:
+      tags: [User]
+      summary: Активні майстри, послуги та зведення відгуків
+      operationId: getUserCatalog
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Довідники для створення замовлення
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserCatalog"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /user/orders:
+    get:
+      tags: [User]
+      summary: Власні замовлення
+      operationId: listUserOrders
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Список замовлень користувача
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrderResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [User]
+      summary: Створити власне замовлення (ідемпотентно)
+      operationId: createUserOrder
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "201":
+          description: Замовлення створено (або повернено повторно за тим самим ключем)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /user/orders/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    put:
+      tags: [User]
+      summary: Змінити власне замовлення (статус лише cancelled)
+      operationId: updateUserOrder
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrderRequest"
+      responses:
+        "200":
+          description: Замовлення оновлено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [User]
+      summary: Скасувати власне замовлення (статус cancelled)
+      operationId: cancelUserOrder
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Замовлення скасовано
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /user/reviews:
+    get:
+      tags: [Reviews]
+      summary: Власні відгуки
+      operationId: listUserReviews
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Відгуки поточного користувача
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Review"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Reviews]
+      summary: Залишити відгук до виконаного замовлення
+      operationId: createReview
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReviewRequest"
+      responses:
+        "201":
+          description: Відгук створено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /reviews:
+    get:
+      tags: [Reviews]
+      summary: Публічні відгуки та зведення по майстрах
+      operationId: listReviews
+      responses:
+        "200":
+          description: Усі відгуки й середні оцінки
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary:
+                    type: object
+                    additionalProperties:
+                      type: object
+                  reviews:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Review"
+
+  /admin/orders:
+    get:
+      tags: [Admin]
+      summary: Усі замовлення
+      operationId: listAdminOrders
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Список усіх замовлень
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrderResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Admin]
+      summary: Створити замовлення від імені адміністратора (ідемпотентно)
+      operationId: createAdminOrder
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "201":
+          description: Замовлення створено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/orders/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    put:
+      tags: [Admin]
+      summary: Змінити будь-яке замовлення
+      operationId: updateAdminOrder
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrderRequest"
+      responses:
+        "200":
+          description: Замовлення оновлено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Admin]
+      summary: Видалити замовлення
+      operationId: deleteAdminOrder
+      security:
+        - cookieAuth: []
+      responses:
+        "204":
+          description: Замовлення видалено
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/catalog/{kind}:
+    parameters:
+      - $ref: "#/components/parameters/CatalogKind"
+    get:
+      tags: [Admin]
+      summary: Усі записи довідника, включно з архівними
+      operationId: listCatalog
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Записи довідника
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CatalogItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Admin]
+      summary: Додати майстра або послугу
+      operationId: createCatalogItem
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CatalogItemInput"
+      responses:
+        "201":
+          description: Запис створено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/catalog/{kind}/{id}:
+    parameters:
+      - $ref: "#/components/parameters/CatalogKind"
+      - $ref: "#/components/parameters/Id"
+    put:
+      tags: [Admin]
+      summary: Змінити запис довідника
+      operationId: updateCatalogItem
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CatalogItemInput"
+      responses:
+        "200":
+          description: Запис оновлено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Admin]
+      summary: Архівувати запис (active=false; замовлення не видаляються)
+      operationId: archiveCatalogItem
+      security:
+        - cookieAuth: []
+      responses:
+        "204":
+          description: Запис архівовано
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: Список користувачів
+      operationId: listUsers
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Користувачі
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/users/{id}/role:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    patch:
+      tags: [Admin]
+      summary: Змінити роль (не можна знизити останнього admin)
+      operationId: changeUserRole
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+                  enum: [user, admin]
+      responses:
+        "200":
+          description: Роль змінено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    delete:
+      tags: [Admin]
+      summary: Видалити звичайного користувача разом із його замовленнями
+      operationId: deleteUser
+      security:
+        - cookieAuth: []
+      responses:
+        "204":
+          description: Користувача видалено
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /admin/audit:
+    get:
+      tags: [Admin]
+      summary: Останні 100 записів журналу аудиту
+      operationId: listAudit
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Журнал аудиту
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: masterhub_session
+      description: Підписаний HttpOnly cookie, що встановлює POST /auth/login.
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    CatalogKind:
+      name: kind
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [masters, services]
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Помилка валідації
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Потрібна автентифікація
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Недостатньо прав
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Ресурс не знайдено
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Конфлікт стану
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    TooManyRequests:
+      description: Перевищено ліміт запитів
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unavailable:
+      description: Залежність недоступна (degraded mode)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    CreateOrderRequest:
+      type: object
+      required: [clientId, masterId, serviceId, scheduledAt]
+      properties:
+        clientId:
+          type: string
+          example: "c-1"
+        contactPhone:
+          type: string
+          nullable: true
+          description: "Контактний український номер для авторизованих user/admin операцій: +380XXXXXXXXX."
+          example: "+380501234567"
+        masterId:
+          type: string
+          example: "m-1"
+        serviceId:
+          type: string
+          example: "s-1"
+        scheduledAt:
+          type: string
+          format: date-time
+          example: "2026-09-20T10:00:00Z"
+
+    UpdateOrderRequest:
+      type: object
+      description: >
+        Часткове оновлення. status приймає перехід за станами
+        (confirmed, done, cancelled); scheduledAt можна оновити окремо.
+      properties:
+        status:
+          type: string
+          enum: [confirmed, done, cancelled]
+        scheduledAt:
+          type: string
+          format: date-time
+
+    OrderResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "o-1"
+        clientId:
+          type: string
+        contactPhone:
+          type: string
+          nullable: true
+          description: Контактний телефон; null для старих/anonymous замовлень без нього.
+        userId:
+          type: string
+          nullable: true
+          description: Власник замовлення; null для legacy anonymous записів.
+        masterId:
+          type: string
+        serviceId:
+          type: string
+        scheduledAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, confirmed, done, cancelled]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      required: [error, requestId]
+      properties:
+        error:
+          type: string
+          example: "ValidationError"
+        code:
+          type: string
+          nullable: true
+          example: "CLIENT_ID_REQUIRED"
+        details:
+          nullable: true
+          oneOf:
+            - type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+            - type: object
+            - type: string
+        requestId:
+          type: string
+          description: Ідентифікатор запиту з заголовка X-Request-Id
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        role:
+          type: string
+          enum: [user, admin]
+
+    RegisterRequest:
+      type: object
+      required: [email, displayName, password]
+      properties:
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+          minLength: 2
+          maxLength: 80
+        password:
+          type: string
+          minLength: 8
+          format: password
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    CatalogItem:
+      type: object
+      properties:
+        id:
+          type: string
+          example: master-1
+        name:
+          type: string
+        specialty:
+          type: string
+          description: Лише для майстрів.
+        description:
+          type: string
+          description: Лише для послуг.
+        active:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    CatalogItemInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        specialty:
+          type: string
+        description:
+          type: string
+        active:
+          type: boolean
+
+    UserCatalog:
+      type: object
+      properties:
+        masters:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogItem"
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogItem"
+        reviewsSummary:
+          type: object
+          additionalProperties:
+            type: object
+
+    CreateReviewRequest:
+      type: object
+      required: [orderId, rating]
+      properties:
+        orderId:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+
+    Review:
+      type: object
+      properties:
+        id:
+          type: string
+        orderId:
+          type: string
+        userId:
+          type: string
+        userDisplayName:
+          type: string
+        masterId:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    AuditEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        userId:
+          type: string
+          nullable: true
+        userEmail:
+          type: string
+          nullable: true
+        action:
+          type: string
+          example: ORDER_CREATED
+        details:
+          type: string
+        entityType:
+          type: string
+          nullable: true
+        entityId:
+          type: string
+          nullable: true

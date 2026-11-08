@@ -1,0 +1,13 @@
+{
+  "name": "k8s-demo-app",
+  "version": "1.0.0",
+  "description": "Kubernetes practical lab 10 demo service",
+  "main": "app/server.js",
+  "scripts": {
+    "start": "node app/server.js",
+    "dev": "node app/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

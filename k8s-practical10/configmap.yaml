@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-demo-config
+  namespace: k8s-demo
+data:
+  APP_NAME: "k8s-demo-app"
+  APP_MODE: "dev"
+  PORT: "8080"
+  SLOW_MS: "1500"

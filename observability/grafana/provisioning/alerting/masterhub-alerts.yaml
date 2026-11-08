@@ -1,0 +1,133 @@
+apiVersion: 1
+
+# Правила алертів, contact point і маршрут (notification policy) для MasterHub.
+# Grafana підхоплює файл автоматично завдяки volume ./observability/grafana/provisioning.
+
+groups:
+  - orgId: 1
+    name: masterhub-api
+    folder: MasterHub
+    interval: 1m
+    rules:
+      - uid: masterhub-error-rate
+        title: MasterHub — 5xx error rate > 5%
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              expr: >-
+                100 * sum(rate(http_server_requests_total{service_name="masterhub-api",http_status_code=~"5.."}[5m]))
+                / clamp_min(sum(rate(http_server_requests_total{service_name="masterhub-api"}[5m])), 0.001)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [5]
+              datasource:
+                type: __expr__
+                uid: __expr__
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: Частка відповідей 5xx перевищила 5% за останні 5 хвилин
+          description: >-
+            Перевірте /health/details, логи API у Loki (рівень error) і трейси в Tempo.
+            Якщо PostgreSQL недоступний — API віддає 503 у degraded mode.
+        labels:
+          severity: critical
+          service: masterhub-api
+
+      - uid: masterhub-latency-p95
+        title: MasterHub — p95 latency > 500 ms
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              expr: >-
+                histogram_quantile(0.95, sum by (le) (rate(http_server_duration_seconds_bucket{service_name="masterhub-api"}[5m])))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.5]
+              datasource:
+                type: __expr__
+                uid: __expr__
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: p95 тривалості запиту перевищив 500 мс за останні 5 хвилин
+          description: >-
+            Знайдіть повільні трейси в Tempo за service.name=masterhub-api,
+            перевірте стан PostgreSQL і навантаження (RPS на дашборді MasterHub RED).
+        labels:
+          severity: warning
+          service: masterhub-api
+
+contactPoints:
+  - orgId: 1
+    name: masterhub-webhook
+    receivers:
+      - uid: masterhub-webhook
+        type: webhook
+        settings:
+          # Навчальний приймач: реальної інтеграції немає, тож доставка може завершуватися помилкою,
+          # але правило, маршрут і стан Firing видно в Grafana → Alerting.
+          url: http://localhost:9999/alerts
+          httpMethod: POST
+
+policies:
+  - orgId: 1
+    receiver: masterhub-webhook
+    group_by: [alertname]
+    group_wait: 10s
+    group_interval: 1m
+    repeat_interval: 4h

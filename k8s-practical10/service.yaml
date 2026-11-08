@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-demo-api
+  namespace: k8s-demo
+  labels:
+    app: k8s-demo-api
+spec:
+  type: ClusterIP
+  selector:
+    app: k8s-demo-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
