@@ -22,7 +22,7 @@
     "@opentelemetry/exporter-prometheus": "^0.300.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.300.0",
     "@opentelemetry/sdk-node": "^0.300.0",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "express": "^5.2.1",
     "pg": "^8.23.1"
   }
